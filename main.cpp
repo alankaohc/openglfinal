@@ -195,6 +195,9 @@ bool initializeGL(){
 }
 void resizeGL(GLFWwindow *window, int w, int h){
 	resize(w, h);
+	// resize งน
+	glViewport(0, 0, w, h); 
+	genTexture(w, h);
 }
 
 void paintGL(){
@@ -245,25 +248,29 @@ void paintGL(){
 	defaultRenderer->startNewFrame();
 
 	// compute shader
-	myComputeRender(m_myCameraManager->playerProjectionMatrix(),
-	m_myCameraManager->playerViewMatrix());
+	myComputeRender(m_myCameraManager);
 	defaultRenderer->m_shaderProgram->useProgram();
 
 	// rendering with player view		
-	defaultRenderer->setViewport(playerViewport[0], playerViewport[1], playerViewport[2], playerViewport[3]);
+
+	// 1. geometry pass: render scene's geometry/color data into gbuffer
+	glBindFramebuffer(GL_FRAMEBUFFER, gBuffer);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	defaultRenderer->setViewport(godViewport[0], godViewport[1], godViewport[2], godViewport[3]);
+	//defaultRenderer->setViewport(playerViewport[0], playerViewport[1], playerViewport[2], playerViewport[3]);
 	defaultRenderer->setView(playerVM);
 	defaultRenderer->setProjection(playerProjMat);
 	defaultRenderer->renderPass();
-	myPlayerRender(m_myCameraManager->playerProjectionMatrix(), m_myCameraManager->playerViewMatrix(), m_myCameraManager);
+	myPlayerRender(m_myCameraManager);
 	defaultRenderer->m_shaderProgram->useProgram();
 	// rendering with god view
+	glBindFramebuffer(GL_FRAMEBUFFER, gBuffer);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	defaultRenderer->setViewport(godViewport[0], godViewport[1], godViewport[2], godViewport[3]);
 	defaultRenderer->setView(godVM);
 	defaultRenderer->setProjection(godProjMat);
 	defaultRenderer->renderPass();
-
-	
-	myGodRender(m_myCameraManager->godProjectionMatrix(), m_myCameraManager->godViewMatrix(), m_myCameraManager);
+	myGodRender(m_myCameraManager);
 	defaultRenderer->m_shaderProgram->useProgram();
 
 	// ===============================
@@ -315,6 +322,10 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
 	else if (key == GLFW_KEY_T) { setKeyStatus(RenderWidgetKeyCode::KEY_T, action); }
 	else if (key == GLFW_KEY_Z) { setKeyStatus(RenderWidgetKeyCode::KEY_Z, action); }
 	else if (key == GLFW_KEY_X) { setKeyStatus(RenderWidgetKeyCode::KEY_X, action); }
+	else if (key == GLFW_KEY_1) { deferredFlag = 1; }
+	else if (key == GLFW_KEY_2) { deferredFlag = 2; }
+	else if (key == GLFW_KEY_3) { deferredFlag = 3; }
+
 }
 void mouseScrollCallback(GLFWwindow *window, double xoffset, double yoffset) {}
 

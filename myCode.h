@@ -11,13 +11,9 @@
 #include "MyComputeShader.h"
 #include "src/MyPoissonSample.h"
 #include <glm/gtx/quaternion.hpp>
+#include <glm/gtc/type_ptr.hpp>
 
 #include "src\MyCameraManager.h"
-
-
-
-
-#include <glm/gtc/type_ptr.hpp>
 
 // shader 
 MyShader* myShaderPointer;
@@ -83,11 +79,10 @@ GLuint textureArrayHandle; // texture buffer
 
 
 
-// rock
+// rock & plane
 
 // shader  
 MyShader* rockShaderPointer;
-
 MyShader* planeShaderPointer;
 
 // load model 
@@ -127,7 +122,6 @@ GLuint planeUvboHandle;      // texture coordinate
 GLuint planeNboHandle;       // normal 
 GLuint planeIboHandle;       // index
 
-
 // uniform location
 GLuint rockProjMatLoc;
 GLuint rockViewMatLoc;
@@ -145,6 +139,60 @@ GLuint planePosLoc;         // slime pos vertex shader
 GLuint planePosCompLoc;     // slime pos compute shader
 
 
+
+
+
+
+
+// G buffer
+unsigned int gBuffer;
+unsigned int gPosition, gNormal, gAlbedoSpec;
+unsigned int rboDepth;
+
+
+// quad
+MyShader* deferredShaderPointer;
+GLuint quadVAO = 0;
+GLuint quadVBO;
+
+// uniform location
+GLuint quadPosLoc;
+GLuint quadNormalLoc;
+GLuint quadAlbedoLoc;
+
+
+// switch mode
+int deferredFlag = 1;
+GLuint deferredFlagLoc;
+
+
+
+void renderQuad()
+{
+	if (quadVAO == 0)
+	{
+		float quadVertices[] = {
+			// positions        // texture Coords
+			-1.0f,  1.0f, 0.0f, 0.0f, 1.0f,
+			-1.0f, -1.0f, 0.0f, 0.0f, 0.0f,
+			 1.0f,  1.0f, 0.0f, 1.0f, 1.0f,
+			 1.0f, -1.0f, 0.0f, 1.0f, 0.0f,
+		};
+		// setup plane VAO
+		glGenVertexArrays(1, &quadVAO);
+		glGenBuffers(1, &quadVBO);
+		glBindVertexArray(quadVAO);
+		glBindBuffer(GL_ARRAY_BUFFER, quadVBO);
+		glBufferData(GL_ARRAY_BUFFER, sizeof(quadVertices), &quadVertices, GL_STATIC_DRAW);
+		glEnableVertexAttribArray(0);
+		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
+		glEnableVertexAttribArray(1);
+		glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(3 * sizeof(float)));
+	}
+	glBindVertexArray(quadVAO);
+	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+	glBindVertexArray(0);
+}
 
 void loadmodel(std::string model_path, int id)
 {
@@ -234,10 +282,6 @@ void loadtexture()
 	glGenerateMipmap(GL_TEXTURE_2D_ARRAY);
 }
 
-
-
-
-
 void loadRockModel()
 {
 	std::string model_path = "assets/MagicRock/magicRock.obj";
@@ -295,13 +339,37 @@ void loadRockModel()
 	}
 }
 
+void loadRockTexture()
+{
+	glGenTextures(1, &rockTextureHandle);
+	glBindTexture(GL_TEXTURE_2D, rockTextureHandle);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	int width, height, nrChannels;
+	stbi_set_flip_vertically_on_load(true);
+
+	rockTextureData = stbi_load("assets/MagicRock/StylMagicRocks_AlbedoTransparency.png", &width, &height, &nrChannels, 0);
+	if (rockTextureData)
+	{
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, rockTextureData);
+		glGenerateMipmap(GL_TEXTURE_2D);
+	}
+	else
+	{
+		std::cout << "Failed to load texture" << std::endl;
+	}
+	stbi_image_free(rockTextureData);
+}
 
 void loadPlaneModel()
 {
 	std::string model_path = "assets/airplane.obj";
 	Assimp::Importer importer;
 	const aiScene* scene = importer.ReadFile(model_path,
-		aiProcess_Triangulate | aiProcess_FlipUVs);
+		aiProcess_Triangulate);
 
 	if (!scene || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene->mRootNode) {
 		std::cerr << "ERROR::ASSIMP::" << importer.GetErrorString() << std::endl;
@@ -351,32 +419,6 @@ void loadPlaneModel()
 			}
 		}
 	}
-}
-
-
-void loadRockTexture()
-{
-	glGenTextures(1, &rockTextureHandle);
-	glBindTexture(GL_TEXTURE_2D, rockTextureHandle);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	int width, height, nrChannels;
-	stbi_set_flip_vertically_on_load(true);
-
-	rockTextureData = stbi_load("assets/MagicRock/StylMagicRocks_AlbedoTransparency.png", &width, &height, &nrChannels, 0);
-	if (rockTextureData)
-	{
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, rockTextureData);
-		glGenerateMipmap(GL_TEXTURE_2D);
-	}
-	else
-	{
-		std::cout << "Failed to load texture" << std::endl;
-	}
-	stbi_image_free(rockTextureData);
 }
 
 void loadPlaneTexture()
@@ -499,7 +541,48 @@ void initSample() {
 	}
 }
 
+void genTexture(int w, int h) {
+	// G buffer
+	int SCR_WIDTH = w/2;
+	int SCR_HEIGHT = h;
+	glGenFramebuffers(1, &gBuffer);
+	glBindFramebuffer(GL_FRAMEBUFFER, gBuffer);
 
+	// position color buffer
+	glGenTextures(1, &gPosition);
+	glBindTexture(GL_TEXTURE_2D, gPosition);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, SCR_WIDTH, SCR_HEIGHT, 0, GL_RGBA, GL_FLOAT, NULL);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, gPosition, 0);
+	// normal color buffer
+	glGenTextures(1, &gNormal);
+	glBindTexture(GL_TEXTURE_2D, gNormal);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, SCR_WIDTH, SCR_HEIGHT, 0, GL_RGBA, GL_FLOAT, NULL);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, gNormal, 0);
+	// color + specular color buffer
+	glGenTextures(1, &gAlbedoSpec);
+	glBindTexture(GL_TEXTURE_2D, gAlbedoSpec);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, SCR_WIDTH, SCR_HEIGHT, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_2D, gAlbedoSpec, 0);
+	// tell OpenGL which color attachments we'll use (of this framebuffer) for rendering 
+	unsigned int attachments[3] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2 };
+	glDrawBuffers(3, attachments);
+	// create and attach depth buffer (renderbuffer)
+
+	glGenRenderbuffers(1, &rboDepth);
+	glBindRenderbuffer(GL_RENDERBUFFER, rboDepth);
+	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT, SCR_WIDTH, SCR_HEIGHT);
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, rboDepth);
+	// finally check if framebuffer is complete
+	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+		std::cout << "Framebuffer not complete!" << std::endl;
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
 
 void initialize() {
 	// prepare a SSBO for storing raw instance data
@@ -664,8 +747,13 @@ void setUniformVariables() {
 	planeModelMatLoc = glGetUniformLocation(planeShaderPointer->ID, "modelMat");
 	planeAlbedoLoc = glGetUniformLocation(planeShaderPointer->ID, "albedoTexture");
 	planePosLoc = glGetUniformLocation(planeShaderPointer->ID, "v_worldPosOffset");
-	
+
+	quadPosLoc = glGetUniformLocation(deferredShaderPointer->ID, "gPosition");
+	quadNormalLoc = glGetUniformLocation(deferredShaderPointer->ID, "gNormal");
+	quadAlbedoLoc = glGetUniformLocation(deferredShaderPointer->ID, "gAlbedoSpec");
+	deferredFlagLoc = glGetUniformLocation(deferredShaderPointer->ID, "flag");
 }
+
 void myInit() {
 	std::cout << "testing\n";
 	
@@ -679,9 +767,9 @@ void myInit() {
 
 	loadRockModel();
 	loadRockTexture();
-
 	loadPlaneModel();
 	loadPlaneTexture();
+
 	const std::string vsFile = "src/shader/myVertexShader.glsl";
 	const std::string fsFile = "src/shader/myFragmentShader.glsl";
 	const std::string csFile = "src/shader/myComputeShader.glsl";
@@ -691,16 +779,27 @@ void myInit() {
 	const std::string planevsFile = "src/shader/rockVertexShader.glsl";
 	const std::string planefsFile = "src/shader/rockFragmentShader.glsl";
 
-	myShaderPointer = new MyShader(vsFile.c_str(), fsFile.c_str());
+	const std::string gvsFile = "src/shader/gbufferVertexShader.glsl";
+	const std::string gfsFile = "src/shader/gbufferFragmentShader.glsl";
+	const std::string dvsFile = "src/shader/deferredVertexShader.glsl";
+	const std::string dfsFile = "src/shader/deferredFragmentShader.glsl";
+
+
+
+	myShaderPointer = new MyShader(gvsFile.c_str(), gfsFile.c_str());
 	rockShaderPointer = new MyShader(rockvsFile.c_str(), rockfsFile.c_str());
 	planeShaderPointer = new MyShader(planevsFile.c_str(), planefsFile.c_str());
 	myCompShaderPointer = new MyComputeShader(csFile.c_str());
 	myResetCompShaderPointer = new MyComputeShader(rcsFile.c_str());
+	deferredShaderPointer = new MyShader(dvsFile.c_str(), dfsFile.c_str());
 	initSample();
 	initialize();
+	genTexture(1024, 512);
 }
-void myComputeRender(glm::mat4 playerProjectionMatrix, glm::mat4 playerViewMatrix) {
-	
+
+void myComputeRender(const INANOA::MyCameraManager* m_myCameraManager) {
+	glm::mat4 playerProjectionMatrix = m_myCameraManager->playerProjectionMatrix();
+	glm::mat4 playerViewMatrix = m_myCameraManager->playerViewMatrix();
 	// reset shader
 	myResetCompShaderPointer->use();
 	glDispatchCompute(1, 1, 1);
@@ -718,16 +817,25 @@ void myComputeRender(glm::mat4 playerProjectionMatrix, glm::mat4 playerViewMatri
 
 }
 
+void myGodRender(const INANOA::MyCameraManager* m_myCameraManager) {
 
-void myGodRender(glm::mat4 godProjectionMatrix, glm::mat4 godViewMatrix, const INANOA::MyCameraManager* m_myCameraManager) {
+	glm::mat4 godProjectionMatrix = m_myCameraManager->godProjectionMatrix();
+	glm::mat4 godViewMatrix = m_myCameraManager->godViewMatrix();
+	glm::vec4 godViewPort = m_myCameraManager->godViewport();
+	glm::vec4 playerViewPort = m_myCameraManager->playerViewport();
+
+	//glViewport(godViewPort[0], godViewPort[1], godViewPort[2], godViewPort[3]);
+
+	// uniform 
 	setUniformVariables();
-
-
-	const glm::mat4 airplaneModelMat = m_myCameraManager->airplaneModelMatrix();
-
 	glm::mat4 model_matrix = glm::mat4(1.0);
 	glm::vec4 positionVec4 = glm::vec4(25.92, 18.27, 11.75, 1.0);
+	const glm::mat4 airplaneModelMat = m_myCameraManager->airplaneModelMatrix();
 	glm::vec4 planepositionVec4 = glm::vec4(0.0, 0.0, 0.0, 1.0);
+
+	//// 1. geometry pass: render scene's geometry/color data into gbuffer
+	//glBindFramebuffer(GL_FRAMEBUFFER, gBuffer);
+	//glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 	// myShader
 	myShaderPointer->use();
@@ -745,7 +853,7 @@ void myGodRender(glm::mat4 godProjectionMatrix, glm::mat4 godViewMatrix, const I
 	// render
 	glMultiDrawElementsIndirect(GL_TRIANGLES, GL_UNSIGNED_INT, 0, 5, sizeof(DrawElementsIndirectCommand));
 
-	//rock
+	// rock
 	rockShaderPointer->use();
 	glUniformMatrix4fv(rockProjMatLoc, 1, GL_FALSE, glm::value_ptr(godProjectionMatrix));
 	glUniformMatrix4fv(rockViewMatLoc, 1, GL_FALSE, glm::value_ptr(godViewMatrix));
@@ -771,16 +879,46 @@ void myGodRender(glm::mat4 godProjectionMatrix, glm::mat4 godViewMatrix, const I
 
 	glDrawElements(GL_TRIANGLES, planeVertexCount, GL_UNSIGNED_INT, 0);
 
+
+	// 2. render pass
+	glViewport(godViewPort[0], godViewPort[1], godViewPort[2], godViewPort[3]);
+	glBindFramebuffer(GL_FRAMEBUFFER, 0); // back to default
+	//glClearColor(0.0f, 1.0f, 1.0f, 1.0f);
+	//glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+	deferredShaderPointer->use();
+	glActiveTexture(GL_TEXTURE5);
+	glBindTexture(GL_TEXTURE_2D, gPosition);
+	glActiveTexture(GL_TEXTURE6);
+	glBindTexture(GL_TEXTURE_2D, gNormal);
+	glActiveTexture(GL_TEXTURE7);
+	glBindTexture(GL_TEXTURE_2D, gAlbedoSpec);
+	glUniform1i(quadPosLoc, 5);
+	glUniform1i(quadNormalLoc, 6);
+	glUniform1i(quadAlbedoLoc, 7);
+	glUniform1i(deferredFlagLoc, deferredFlag);
+	renderQuad();
 }
-void myPlayerRender(glm::mat4 playerProjectionMatrix, glm::mat4 playerViewMatrix, const INANOA::MyCameraManager* m_myCameraManager) {
+
+void myPlayerRender(const INANOA::MyCameraManager* m_myCameraManager) {
+
+	glm::mat4 playerProjectionMatrix = m_myCameraManager->playerProjectionMatrix();
+	glm::mat4 playerViewMatrix = m_myCameraManager->playerViewMatrix();
+	glm::vec4 godViewPort = m_myCameraManager->godViewport();
+	glm::vec4 playerViewPort = m_myCameraManager->playerViewport();
+
+	//glViewport(godViewPort[0], godViewPort[1], godViewPort[2], godViewPort[3]);
+
 	setUniformVariables();
-
-
-	const glm::mat4 airplaneModelMat = m_myCameraManager->airplaneModelMatrix();
-
 	glm::mat4 model_matrix = glm::mat4(1.0);
 	glm::vec4 positionVec4 = glm::vec4(25.92, 18.27, 11.75, 1.0);
+	const glm::mat4 airplaneModelMat = m_myCameraManager->airplaneModelMatrix();
 	glm::vec4 planepositionVec4 = glm::vec4(0.0, 0.0, 0.0, 1.0);
+
+	//// 1. geometry pass: render scene's geometry/color data into gbuffer
+	//glBindFramebuffer(GL_FRAMEBUFFER, gBuffer);
+	//glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
 	// myShader
 	myShaderPointer->use();
 	glUniformMatrix4fv(projMatLoc, 1, false, glm::value_ptr(playerProjectionMatrix));
@@ -811,6 +949,7 @@ void myPlayerRender(glm::mat4 playerProjectionMatrix, glm::mat4 playerViewMatrix
 
 	glDrawElements(GL_TRIANGLES, rockVertexCount, GL_UNSIGNED_INT, 0);
 
+
 	//plane
 	planeShaderPointer->use();
 	glUniformMatrix4fv(planeProjMatLoc, 1, GL_FALSE, glm::value_ptr(playerProjectionMatrix));
@@ -823,5 +962,26 @@ void myPlayerRender(glm::mat4 playerProjectionMatrix, glm::mat4 playerViewMatrix
 	glBindVertexArray(planeVaoHandle);
 
 	glDrawElements(GL_TRIANGLES, planeVertexCount, GL_UNSIGNED_INT, 0);
+
+
+	// 2. render pass
+	glViewport(playerViewPort[0], playerViewPort[1], playerViewPort[2], playerViewPort[3]);
+	glBindFramebuffer(GL_FRAMEBUFFER, 0); // back to default
+	//glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+	//glClear(GL_COLOR_BUFFER_BIT);
+
+	deferredShaderPointer->use();
+	glActiveTexture(GL_TEXTURE6);
+	glBindTexture(GL_TEXTURE_2D, gPosition);
+	glActiveTexture(GL_TEXTURE7);
+	glBindTexture(GL_TEXTURE_2D, gNormal);
+	glActiveTexture(GL_TEXTURE8);
+	glBindTexture(GL_TEXTURE_2D, gAlbedoSpec);
+	glUniform1i(quadPosLoc, 6);
+	glUniform1i(quadNormalLoc, 7);
+	glUniform1i(quadAlbedoLoc, 8);
+	glUniform1i(deferredFlagLoc, deferredFlag);
+	renderQuad();
+	
 }
 
